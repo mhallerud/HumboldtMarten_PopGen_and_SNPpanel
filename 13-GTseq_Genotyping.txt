@@ -1,0 +1,164 @@
+#!/bin/bash
+
+##### PURPOSE: Genotyping raw sequencing data from GBAS #####
+##### DEPENDENCIES: #####
+## GTseq-Pipeline: https://github.com/GTseq/GTseq-Pipeline/tree/master
+## PEAR v0.9.6
+
+
+##### INPUTS: Raw, demultiplexed sequencing data with R1.fq.gz and R2.fq.gz per PCR replicate
+##### This was run separately for each sequencing run
+## location: ${RUNDIR}/illumina/raw
+## AssayInfo.csv: Primer and probe sequences
+## AssayInfo_2.csv: Primer and probe sequences for microhaplotypes
+RUNDIR=$1 # output directory / folder holding raw sequencing data
+GTSEQPIPELINE_DIR=$2 # path to GT-seq Pipeline directory
+
+
+
+#### STEP 1: PAIR READS ####
+cd ${RUNDIR}/illumina/raw 
+
+# make file with commands for individual pear runs
+for f in `ls -1 *fastq.gz | rev | cut -c 17- | rev | sort | uniq`;
+do
+  	echo pear -f "${f}"_R1_001.fastq.gz -r "${f}"_R2_001.fastq.gz -n 70 -j 40 -o ../"${f}"
+done > pearrun.txt
+
+## run pear jobs with multithreading: cat pearrun.txt | hqsub -t array -q fw -r pearrun_log
+
+# move unnecessary outputs into a separate dir
+mkdir pear
+mv *unassembled*fastq pear
+mv *discarded.fastq pear 
+cd ../../.. 
+
+
+
+#### STEP 2: MAKE HASHES ####
+# set up folder structure
+mkdir ${RUNDIR}/intermediary
+mkdir ${RUNDIR}/intermediary/hash
+
+# run GTseq_HashSeqs for each sample
+for S in `ls -1 ${RUNDIR}/illumina/*fastq`; do
+        echo "Processing: ${S}"
+        SAMPLE="$(basename $S)"
+        perl ${GTSEQPIPELINE_DIR}/GTseq_HashSeqs.pl ${RUNDIR}/illumina/${SAMPLE} > ${RUNDIR}/intermediary/hash/${SAMPLE}.hash
+done
+
+
+
+#### STEP 3: GENOTYPE SAMPLES ####
+# set up folder structure 
+mkdir ${RUNDIR}/outputs
+mkdir ${RUNDIR}/outputs/genos
+mkdir ${RUNDIR}/outputs/genos2
+
+# run genotypes for each sample
+for S in `ls ${RUNDIR}/illumina/*fastq -1 | sed 's/fastq//'`; do
+    SAMPLE="$(basename $S)"
+    echo "Processing: ${SAMPLE}fastq"
+    # Determining via ${GENOTYPER_VERSION} if we run the latest, default v3 or user specified v2
+    # v3 requires the String::Approx perl extension
+    perl ${GTSEQPIPELINE_DIR}/GTseq_Genotyper_v3.pl AssayInfo_MARTEN.csv ${RUNDIR}/illumina/${SAMPLE}fastq > ${RUNDIR}/outputs/genos/${SAMPLE}genos
+    perl ${GTSEQPIPELINE_DIR}/GTseq_Genotyper_v3.pl AssayInfo_MARTEN_Microhaps.csv ${RUNDIR}/illumina/${SAMPLE}fastq > ${RUNDIR}/outputs/genos2/${SAMPLE}genos
+done
+
+
+
+#### STEP 4: COMPILE GENOTYPES ACROSS SAMPLES ####
+cd ${RUNDIR}/outputs/genos
+perl ../../../{GTSEQPIPELINE_DIR}/GTseq_GenoCompile_v3.pl > ../Library_Genotypes.csv
+
+cd ../genos2
+perl ../../../{GTSEQPIPELINE_DIR}/GTseq_GenoCompile_v3.pl > ../Library_Genotypes_2.csv  
+
+
+cd ../../..
+
+
+
+
+################# THESE 2 FILES WERE THEN COMBINED INTO A SINGLE CSV, SORTED BY SAMPLE ID, AND 
+################# CONSENSUS GENOTYPES WERE FORMED MANUALLY
+
+
+
+########## ADDITIONAL STEPS USED IN EVALUATION ###################
+
+#### STEP 5: COMPILE READ COUNTS PER LOCUS ####
+# copy genos and fastq files into new dir
+mkdir ${RUNDIR}/intermediary/genos-fastq
+for FASTQFILE in `ls -1 ${RUNDIR}/illumina/*fastq`;
+do
+	ln -s ${FASTQFILE} ${RUNDIR}/intermediary/genos-fastq
+done
+
+for GENOSFILE in `ls -1 ${RUNDIR}/outputs/genos/*fastq`;
+do
+	ln -s ${GENOSFILE} ${RUNDIR}/intermediary/genos-fastq
+done 
+
+# run compile counts
+perl ${GTSEQPIPELINE_DIR}/GTseq_GenoCompile_Counts.pl > ${RUNDIR}/outputs/Library_Counts.csv
+ 
+
+
+#### STEP 6: MAKE TESTSEQS ####
+mkdir ${RUNDIR}/outputs/seqtest
+
+echo "Creating seqtest files..."
+for SAMPLE in `ls -1 ${RUNDIR}/intermediary/hash`; do
+   echo "Processing: ${SAMPLE}"
+   perl ${GTSEQPIPELINE_DIR}/GTseq_SeqTest.pl AssayInfo_MARTEN.csv ${RUNDIR}/intermediary/hash/${SAMPLE} > ${RUNDIR}/outputs/seqtest/${SAMPLE}.seqtest.csv
+done
+
+
+
+#### STEP 7: FIND PRIMER INTERACTIONS ####
+mkdir ${RUNDIR}/outputs/interactions
+
+echo "Testing for primer interactions..."
+for SAMPLE in `ls -1 ${RUNDIR}/intermediary/hash`; do
+   echo "Processing: ${SAMPLE}"
+   perl ${GTSEQPIPELINE_DIR}/GTseq_Primer-Interaction-Test.pl PrimerInfo.txt ${RUNDIR}/intermediary/hash/${SAMPLE} > ${RUNDIR}/outputs/interactions/${SAMPLE}.interactions.tsv
+done
+
+
+
+#### STEP 8: MAKE ERROR REPORTS ####
+mkdir ${RUNDIR}/outputs/errorreports
+cd ${RUNDIR}/outputs/genos
+
+for SAMPLE in `ls -1`; do
+   echo "Processing: ${SAMPLE}"
+      perl ${CURRDIR}/${GTSEQPIPELINE_DIR}/GTseq_ErrorReport_v3.pl ${SAMPLE} > ../errorreports/${SAMPLE}_ErrorReport.csv
+done
+
+## Compile error reports
+for SAMPLE in `ls -1 ${RUNDIR}/outputs/errorreports`; do
+        awk '{print FILENAME, $0}' ${RUNDIR}/outputs/errorreports/$SAMPLE >> ${RUNDIR}/outputs/Library_ErrorReports.csv
+done
+
+
+
+#### STEP 9: ALTERNATIVE GENOS FILES- THESE WILL BE USED TO CHECK ALLELE BALANCES ####
+## The below was saved as a bash function (NewGTseq.sh) and multi-threaded via:
+ls *.fastq | sed 's/^/NewGTSeq.sh AssayInfo_MARTEN.txt /g' > rungtseq.txt
+
+
+#!/bin/bash
+while read Locus Allele1 Allele2 Probe1 Probe2 Primer       
+do
+
+for i in $2
+	do
+
+                grep $Primer.*$Probe1 $i| wc -l | sed 's/^/'$Locus','$Allele1',/g' >> $i.genos
+                grep $Primer.*$Probe2 $i| wc -l | sed 's/^/'$Locus','$Allele2',/g' >> $i.genos
+                grep $Primer $i| wc -l | sed 's/^/'$Locus',ALL,/g' >> $i.genos
+                
+        done    
+
+done<$1

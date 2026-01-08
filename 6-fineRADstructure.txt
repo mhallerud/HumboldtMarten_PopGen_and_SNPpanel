@@ -1,0 +1,18 @@
+#!/bin/bash
+####--------RUN RADPAINTER & FINESTRUCTURE-------------####
+
+NAME=LowMissingnessRAD
+
+# use populations to convert filtered VCF to radpainter format 
+populations -V ${NAME}.vcf -O . --radpainter
+
+# Calculate the co-ancestry matrix
+RADpainter paint ${NAME}.p.haps.radpainter
+ 
+# Assign individuals to populations*
+finestructure -x 100000 -y 100000 -z 1000 ${NAME}_chunks.out ${NAME}_chunks.mcmc.xml
+
+
+# Tree building
+finestructure -m T -x 10000 ${NAME}_chunks.out ${NAME}_chunks.mcmc.xml ${NAME}_chunks.mcmcTree.xml
+

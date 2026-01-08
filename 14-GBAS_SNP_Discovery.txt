@@ -1,0 +1,86 @@
+#!/bin/bash
+# TO RUN: USEARCH_microhaps.sh <INPUT GTSEQ DIRECTORY> <GENOTYPING LOCI FASTA> <DEPTH THRESHOLD> <ALIGNMENT THRESHOLD> <OUTNAME>
+# grab environmental variables from input
+DIR=$1
+REF=$2
+DP_THRESH=$3 #30 or 200 (conservative)
+ALN_THRESH=$4 # 0.95
+
+# set up environment
+#pushd ${DIR}/intermediary/hash
+OUT=$5 #"$(OUTname $DIR)"
+
+# merge all hash files
+echo "Merging sequences across samples...."
+[ -f ${OUT}_hash.fasta ] && rm ${OUT}_hash.fasta -f
+cat ${DIR}/intermediary/hash/*hash > ${OUT}_hash.fasta
+LINES="$(grep '>' ${OUT}_hash.fasta | wc -l)"
+echo "...${LINES} sequences merged"
+
+# call amplicon sequence variants for whole run
+#echo "Identifying ASVs...."
+# (previous file is required to be sorted by size prior to input to next step)
+#usearch -sortbysize Nextseq496_hash.fasta -fastaout Nextseq496_hashsorted.fasta -minsize 4
+#usearch -unoise3 ${OUT}_hash.fasta -zotus ${OUT}_ZOTUs.fasta -tabbedout ${OUT}_ZOTUs.tsv
+
+# remove sequences with <30 reads
+echo "Removing sequences with fewer than 30 reads (i.e., presumed sequencing/PCR errors)..."
+[ -f filtered.temp ] && rm filtered.temp -f
+# NOTE: This threshold is based on the minimum mean read count per locus (40 for martens)
+grep ">" ${OUT}_hash.fasta | awk -v dp=${DP_THRESH} '{FS=";"}{OFS=";"}{if($3>=dp) print "",$2,$3}' > filtered.temp
+seqkit grep -f filtered.temp ${OUT}_hash.fasta -o ${OUT}_hash_dp${DP_THRESH}.fasta
+seqtk seq ${OUT}_hash_dp${DP_THRESH}.fasta > ${OUT}_hash_dp${DP_THRESH}.singeline.fasta
+rm ${OUT}_hash_dp${DP_THRESH}.fasta -f
+mv ${OUT}_hash_dp${DP_THRESH}.singleline.fasta ${OUT}_hash_dp${DP_THRESH}.fasta
+LINES="$(grep '>' ${OUT}_hash_dp${DP_THRESH}.fasta | wc -l)"
+echo "...${LINES} sequences remain after filtering"
+
+# extract unique sequences, counts will be occurrence across replicates
+echo "Extracting unique sequences across all samples...."
+[ -f ${OUT}_uniques_min3.singleline.fasta ] || rm ${OUT}_uniques_min3.singleline.fasta -f
+usearch -fastx_uniques ${OUT}_hash_dp${DP_THRESH}.fasta -fastaout ${OUT}_uniques_min3_dp${DP_THRESH}.fasta -sizeout -minuniquesize 3 -relabel Uniq -tabbedout ${OUT}_uniques_min3_dp${DP_THRESH}.tsv
+seqtk seq ${OUT}_uniques_min3_dp${DP_THRESH}.fasta > ${OUT}_uniques_min3.singleline.fasta
+[ -f ${OUT}_uniques_min3_dp${DP_THRESH}.fasta ] && rm ${OUT}_uniques_min3_dp${DP_THRESH}.fasta -f
+mv ${OUT}_uniques_min3.singleline.fasta ${OUT}_uniques_min3_dp${DP_THRESH}.fasta
+LINES="$(grep '>' ${OUT}_uniques_min3_dp${DP_THRESH}.fasta | wc -l)"
+echo "...${LINES} unique sequences identified"
+
+# global alignment to reference loci, only keeping alignments matching above set threshold
+#popd
+echo "Aligning sequences to reference loci...."
+usearch -usearch_global ${OUT}_uniques_min3_dp${DP_THRESH}.fasta -db ${REF} -id ${ALN_THRESH} -strand both -blast6out ${OUT}_matches.nast -alnout ${OUT}_matches.aln
+
+echo "Aligning sequences to reference loci...."
+usearch -usearch_global ${OUT}_uniques_min3_dp${DP_THRESH}.fasta -db ${REF} -id ${ALN_THRESH} -strand both -blast6out ${OUT}_matches.nast -alnout ${OUT}_matches.aln
+LINES="$(wc -l ${OUT}_matches.nast | awk '{print $1}')"
+echo "...${LINES} sequences align at ${THRESHOLD}% threshold to reference loci"
+
+# extract aligned sequences for each locus
+echo "Extracting aligned sequences...."
+[ -f ${OUT}_AllMatches_dp${DP_THRESH}.fa ] && rm ${OUT}_AllMatches_dp${DP_THRESH}.fa -f
+grep ">" ${REF} | sed 's/>//g' > temp.loci
+while read locus
+do
+  	echo "....."${locus}
+        #[ -f ${locus}_matches.fa ] && rm ${locus}_matches.fa -f
+        for seq in `grep ${locus} ${OUT}_matches.nast  | awk '{print $1}'`
+        do
+                        grep ${seq} ${OUT}_uniques_min3_dp${DP_THRESH}.fasta -A1 >> ${OUT}_AllMatches_dp${DP_THRESH}.fa
+        done
+done<temp.loci
+rm temp.loci -f
+LINES="$(grep '>' ${OUT}_AllMatches_dp${DP_THRESH}.fa | wc -l)"
+echo "...${LINES} sequences extracted"
+
+# call SNPs
+echo "Calling SNPs from aligned sequences..."
+# step 1: we need to rereplicate the fasta file, note that sequence copy numbers reflect 
+#the number of PCR replicates a sequence is present in (at specified depth threshold)
+vsearch --rereplicate ${OUT}_AllMatches_dp${DP_THRESH}.fa --output ${OUT}_AllMatches_dp${DP_THRESH}.rerep.fa
+# step 2: align to reference loci
+bwa index ${REF}
+bwa mem ${REF} ${OUT}_AllMatches_dp${DP_THRESH}.rerep.fa | samtools sort > ${OUT}_AllMatches_dp${DP_THRESH}.bam
+# step 3: call SNPs- max depth for 10000 reps to avoid excluding any samples
+# note: using a p-value of 1.0 means all SNPs are kept (i.e., 'read counts' not used to determine if a variant is present)
+tabix ${OUT}_AllMatches_dp${DP_THRESH}.bam
+bcftools mpileup ${OUT}_AllMatches_dp${DP_THRESH}.bam -f ${REF} --max-depth 10000 | bcftools call -cv -p 1.0 > ${OUT}_AllMatches_dp${DP_THRESH}.vcf
