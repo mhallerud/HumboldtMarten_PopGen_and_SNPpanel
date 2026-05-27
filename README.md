@@ -15,7 +15,7 @@ Hallerud, M.A., K. Moriarty, K.L. Pilgrim, C.E. Eriksson, M.K. Schwartz, and T. 
 * **7-ddRADseq_PopGenMetrics.R**: Calculating population genetics metrics (e.g., Fst, Fis, Ho, Hs) and individual metrics (e.g., heterozygosity and inbreeding) from the ddRADseq dataset.
 * **8-triangulaR.R**: Assessing putative hybridization with triangle plots.
 * **9-NeEstimator.R**: Calculating effective population size with NeEstimator.
-* 
+* (oops- no 10)
 * **11-IQtree_phylogeny.sh**: Constructing phylogeny using IQtree-2.
 * **12-mitogenome_nucleotide_diversity.sh**: Calculating nucleotide diversity from previously published mitogenomes.
 * **13-GTseq_Genotyping.txt**: Processing raw GBAS sequencing data using the [GTseq-Pipeline](https://github.com/GTseq/GTseq-Pipeline/).
