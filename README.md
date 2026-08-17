@@ -1,9 +1,14 @@
 # Humboldt_Marten_Genetic_Assessment_scripts
 
 ## Citation
-Hallerud, M.A., K. Moriarty, K.L. Pilgrim, C.E. Eriksson, M.K. Schwartz, and T. Levi. 2026. Leveraging next-generation tools for genetic assessment and demographic monitoring in threatened and elusive Humboldt martens. Evolutionary Applications (in press).
+Hallerud, M.A., K. Moriarty, K.L. Pilgrim, C.E. Eriksson, M.K. Schwartz, and T. Levi. 2026. Leveraging next-generation tools for genetic assessment and demographic monitoring in threatened and elusive Humboldt martens. *Evolutionary Applications* 19(7): e70277. [https://doi.org/10.1111/eva.70277](https://doi.org/10.1111/eva.70277).
 
 ## Contents:
+### Data
+* GBAS_Individual_Genotypes.csv: Consensus genotypes for each individual.
+* GBAS_Raw_Genotypes.csv: Replicate-level genotypes for each sample.
+
+### Code
 * **1-SNP_discovery.sh**: ddRADseq SNP discovery with *de novo* Stacks
 * **2-SNP_Filtering.sh**: SNP filtering for ddRADseq dataset.
 * **2B-SNP_Filtering_GBAS_Panel.sh**: SNP filtering to identify candidate SNPs for use in GBAS panel.
@@ -26,5 +31,5 @@ Hallerud, M.A., K. Moriarty, K.L. Pilgrim, C.E. Eriksson, M.K. Schwartz, and T. 
 * **18-Full_GBAS_Analyses.R**: Analyses based on the full GBAS dataset (validation + application).
 
 
-## Data:
-Minimally demultiplexed ddRADseq data is available in NCBI's Sequence Read Archive under the PRJNA [TBD].
+## Additional Data Resources:
+Minimally demultiplexed ddRADseq data is available in NCBI's Sequence Read Archive under [PRJNA1470952](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA1470952/).
